@@ -13,7 +13,7 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 
 command -v ffmpeg >/dev/null 2>&1 || { echo "ffmpeg が必要です" >&2; exit 1; }
 
-python3 -u - "$DIR" "${1:-2560}" "${2:-1440}" <<'PYEOF'
+python3 -u - "$DIR" "${1:-2560}" "${2:-1440}" <<'PYEOF' &
 import os, sys
 
 base, W, H = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
@@ -56,3 +56,9 @@ if made:
     if os.path.exists(cfg):
         os.utime(cfg, None)
 PYEOF
+
+# 子を背後で走らせて wait で待つ。こうしないと、待っている間にシグナルを受けても
+# 処理が保留され、シェルだけ止まって Python が生き残る
+CHILD=$!
+trap 'kill -TERM "$CHILD" 2>/dev/null; pkill -TERM -P "$CHILD" 2>/dev/null' INT TERM
+wait "$CHILD"
