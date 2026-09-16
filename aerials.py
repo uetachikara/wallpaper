@@ -196,4 +196,18 @@ def convert(asset_id, wallpaper_dir, width=2560, height=1440):
         if os.path.exists(dst):
             os.remove(dst)
         return None, (r.stderr or "変換に失敗しました").strip()[:200]
+
+    link_marker(wallpaper_dir, out_name, src)
     return out_name, None
+
+
+def link_marker(wallpaper_dir, out_name, src):
+    """設定画面でカテゴリ表示するための目印を media/apple-aerials/ に置く。
+
+    原本は数百MBあるため複製せず、シンボリックリンクで参照だけ張る。
+    """
+    media = os.path.join(os.path.dirname(wallpaper_dir), "media", "apple-aerials")
+    os.makedirs(media, exist_ok=True)
+    link = os.path.join(media, os.path.splitext(out_name)[0] + ".mov")
+    if not os.path.lexists(link):
+        os.symlink(src, link)

@@ -341,8 +341,40 @@ class Handler(http.server.BaseHTTPRequestHandler):
         touch_config()
         self._send(200, {"ok": True, "name": name})
 
+    def _handle_aerial_remove(self):
+        """取り込んだ空撮を消す。元の映像には触れないので、いつでも入れ直せる。"""
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        asset_id = query.get("id", [""])[0]
+        if not asset_id or "/" in asset_id or ".." in asset_id:
+            self._send(400, {"error": "id が不正です"})
+            return
+
+        target = next((a for a in aerials.available(WALLPAPER) if a["id"] == asset_id), None)
+        if not target:
+            self._send(404, {"error": "見つかりません"})
+            return
+
+        stem = os.path.splitext(target["file"])[0]
+        for path in (os.path.join(WALLPAPER, target["file"]),
+                     os.path.join(MEDIA, "apple-aerials", stem + ".mov"),
+                     os.path.join(THUMBS, stem + ".jpg")):
+            if os.path.lexists(path):
+                os.remove(path)
+
+        # 消したものが除外リストに残っていると設定が汚れるので外す
+        cfg = load_config()
+        if target["file"] in cfg["exclude"]:
+            cfg["exclude"] = [n for n in cfg["exclude"] if n != target["file"]]
+            save_config(cfg)
+        else:
+            touch_config()
+        self._send(200, {"ok": True})
+
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
+        if path == "/api/aerials/remove":
+            self._handle_aerial_remove()
+            return
         if path == "/api/aerials/import":
             self._handle_aerial_import()
             return
