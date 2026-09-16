@@ -54,6 +54,21 @@
                 font-size: 13px; line-height: 20px; text-align: center; font-weight: 700; }
   .card.off .mark { display: none; }
 
+  /* 追加エリア */
+  .drop { border: 2px dashed var(--line); border-radius: 10px; padding: 18px;
+          text-align: center; color: var(--muted); margin-bottom: 20px;
+          transition: border-color .15s, background .15s; }
+  .drop.over { border-color: var(--accent); background: rgba(106,169,255,.08); }
+  .drop strong { color: var(--text); font-weight: 600; }
+  .drop .hint { font-size: 12px; margin-top: 4px; }
+  .drop input[type=file] { display: none; }
+  .uplog { margin-top: 12px; text-align: left; font-size: 12px; max-height: 180px;
+           overflow-y: auto; }
+  .uplog div { padding: 3px 0; border-bottom: 1px solid var(--line); }
+  .uplog .ng { color: #ff8b8b; }
+  .uplog .warn { color: #ffcf7a; }
+  .uplog .ok { color: var(--muted); }
+
   /* 保存バー */
   .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel);
          border-top: 1px solid var(--line); padding: 14px 24px;
@@ -71,6 +86,17 @@
 
 <main>
   <div class="controls" id="controls"></div>
+
+  <div class="drop" id="drop">
+    <strong>ここに画像や動画をドラッグ</strong>
+    <div class="hint">
+      または <button type="button" id="pick">ファイルを選ぶ</button>　
+      jpg / png / webp / heic / mp4 / mov（1ファイル 300MB まで）
+    </div>
+    <input type="file" id="file" multiple
+           accept=".jpg,.jpeg,.png,.webp,.heic,.tif,.tiff,.mp4,.m4v,.mov">
+    <div class="uplog" id="uplog"></div>
+  </div>
 
   <div class="cats" id="cats"></div>
 
@@ -225,6 +251,68 @@ $('save').addEventListener('click', async () => {
     $('save').disabled = false;
   }
 });
+
+// ---- 画像・動画の追加 ----
+
+const drop = $('drop');
+const uplog = $('uplog');
+
+function logLine(cls, text) {
+  const el = document.createElement('div');
+  el.className = cls;
+  el.textContent = text;
+  uplog.prepend(el);
+}
+
+/** 1ファイルずつ送る。multipart を使わず、名前はクエリ・中身は本文そのままで渡す。 */
+async function upload(file) {
+  const url = '/api/upload?name=' + encodeURIComponent(file.name);
+  const res = await fetch(url, { method: 'POST', body: file });
+  let data;
+  try { data = await res.json(); } catch { data = { error: 'サーバーが応答しませんでした' }; }
+
+  if (!res.ok || data.error) {
+    logLine('ng', `${file.name} — ${data.error || res.status}`);
+    return false;
+  }
+  if (data.warning) {
+    logLine('warn', `${file.name} — 追加（${data.width}x${data.height}）${data.warning}`);
+  } else {
+    logLine('ok', `${file.name} — 追加（${data.width}x${data.height}）`);
+  }
+  return true;
+}
+
+async function handleFiles(fileList) {
+  const files = [...fileList];
+  if (!files.length) return;
+
+  let done = 0;
+  for (const f of files) {
+    $('status').textContent = `追加中… ${done + 1} / ${files.length}（${f.name}）`;
+    // 動画の変換は時間がかかるので直列で処理する
+    await upload(f);
+    done++;
+  }
+  $('status').textContent = '追加しました。一覧を更新します';
+  await load();
+}
+
+$('pick').addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', (e) => {
+  handleFiles(e.target.files);
+  e.target.value = '';   // 同じファイルを続けて選べるようにする
+});
+
+['dragenter', 'dragover'].forEach(ev =>
+  drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev =>
+  drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
+
+// ページ全体へ落とされた場合にブラウザがファイルを開いてしまうのを防ぐ
+['dragover', 'drop'].forEach(ev =>
+  document.addEventListener(ev, (e) => { if (e.target !== drop) e.preventDefault(); }));
 
 $('reset').addEventListener('click', load);
 
