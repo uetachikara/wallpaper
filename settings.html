@@ -123,11 +123,10 @@
   </div>
 
   <div class="section" id="aerialSection" hidden>
-    <h2>Mac の空撮壁紙</h2>
+    <h2>未取り込みの Mac 空撮壁紙</h2>
     <div class="note">
-      macOS がダウンロード済みの映像。クリックすると画面サイズへ変換して追加する
-      （1本あたり40秒ほど）。取り込み済みをもう一度クリックすると取り消す。
-      <span id="aerialCount"></span>
+      macOS にあるが、まだ取り込んでいない映像。クリックすると画面サイズへ変換して追加する
+      （1本あたり40秒ほど）。<span id="aerialCount"></span>
     </div>
     <div class="aerials" id="aerials"></div>
   </div>
@@ -377,55 +376,33 @@ async function loadAerials() {
   } catch {
     aerialItems = [];
   }
-  if (!aerialItems.length) return;   // 1本も無ければ節を出さない
+  // 取り込むものが無ければ節ごと隠す。全部入っている状態では出しても意味がない
+  const pending = aerialItems.filter(a => !a.imported);
+  if (!pending.length) {
+    $('aerialSection').hidden = true;
+    return;
+  }
 
   $('aerialSection').hidden = false;
   refreshAerialCount();
 
-  $('aerials').innerHTML = aerialItems.map(a => `
-    <div class="ae ${a.imported ? 'done' : ''}" data-id="${a.id}">
+  $('aerials').innerHTML = pending.map(a => `
+    <div class="ae" data-id="${a.id}">
       ${a.hasThumb
         ? `<img loading="lazy" src="/aerial-thumb/${a.id}" alt="">`
         : '<img alt="">'}
-      <span class="state">${a.imported ? '✓' : a.sizeMB + 'MB'}</span>
+      <span class="state">${a.sizeMB ? a.sizeMB + 'MB' : ''}</span>
       <span class="cap">${a.name}</span>
     </div>`).join('');
 
   $('aerials').querySelectorAll('.ae').forEach(el => {
-    el.addEventListener('click', () => {
-      const item = aerialItems.find(a => a.id === el.dataset.id);
-      // 取り込み済みなら取り消し、そうでなければ取り込み
-      item && item.imported ? removeAerial(el) : importAerial(el);
-    });
+    el.addEventListener('click', () => importAerial(el));
   });
 }
 
-/** 取り込みを取り消す。元の映像は消さないので、いつでも入れ直せる。 */
-async function removeAerial(el) {
-  const id = el.dataset.id;
-  const item = aerialItems.find(a => a.id === id);
-  if (!item || !item.imported || aerialBusy) return;
-
-  el.classList.remove('done');
-  el.querySelector('.state').textContent = item.sizeMB + 'MB';
-  try {
-    const res = await fetch('/api/aerials/remove?id=' + encodeURIComponent(id), { method: 'POST' });
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || res.status);
-    item.imported = false;
-    $('status').textContent = `${item.name} を取り消しました`;
-    await load();
-    refreshAerialCount();
-  } catch (e) {
-    el.classList.add('done');
-    el.querySelector('.state').textContent = '✓';
-    $('status').textContent = '取り消しに失敗: ' + e.message;
-  }
-}
-
 function refreshAerialCount() {
-  const done = aerialItems.filter(a => a.imported).length;
-  $('aerialCount').textContent = `取り込み済み ${done} / ${aerialItems.length} 本`;
+  const pending = aerialItems.filter(a => !a.imported).length;
+  $('aerialCount').textContent = `未取り込み ${pending} 本`;
 }
 
 async function importAerial(el) {
@@ -447,12 +424,9 @@ async function importAerial(el) {
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || res.status);
     item.imported = true;
-    el.classList.remove('busy');
-    el.classList.add('done');
-    el.querySelector('.state').textContent = '✓';
     $('status').textContent = `${item.name} を追加しました`;
-    await load();                           // 下の一覧にも反映する
-    refreshAerialCount();
+    await load();          // 下の一覧に反映する
+    await loadAerials();   // 取り込んだものは未取り込みの一覧から消える
   } catch (e) {
     el.classList.remove('busy');
     el.querySelector('.state').textContent = item.sizeMB + 'MB';

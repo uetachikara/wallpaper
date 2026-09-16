@@ -65,6 +65,7 @@ cd ~/Awe
 ```json
 {
   "setWallpaper": true,  // Mac の壁紙も同じ画像に合わせるか
+  "aerialSkip": [],      // 取り込まないと決めた空撮の ID。候補に出さない
   "interval": 10,        // 画像の表示秒数
   "videoInterval": 30,   // 動画の表示秒数
   "fade": 2.5,           // クロスフェードの秒数

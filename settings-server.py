@@ -50,6 +50,7 @@ DEFAULTS = {
     "pan": 0.02,
     "exclude": [],
     "setWallpaper": True,
+    "aerialSkip": [],          # 取り込まないと決めた空撮の ID
 }
 
 # media/ のフォルダ名を画面に出す日本語名へ対応づける
@@ -236,8 +237,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, {"items": list_items(), "config": load_config()})
 
         elif path == "/api/aerials":
-            # Mac にダウンロード済みの空撮壁紙を一覧する
-            self._send(200, {"items": aerials.available(WALLPAPER)})
+            # 取り込まないと決めたものは候補から外す
+            skip = set(load_config().get("aerialSkip", []))
+            items = [a for a in aerials.available(WALLPAPER) if a["id"] not in skip]
+            self._send(200, {"items": items})
 
         elif path.startswith("/aerial-thumb/"):
             asset_id = urllib.parse.unquote(path[len("/aerial-thumb/"):])
@@ -361,13 +364,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if os.path.lexists(path):
                 os.remove(path)
 
-        # 消したものが除外リストに残っていると設定が汚れるので外す
         cfg = load_config()
-        if target["file"] in cfg["exclude"]:
-            cfg["exclude"] = [n for n in cfg["exclude"] if n != target["file"]]
-            save_config(cfg)
-        else:
-            touch_config()
+        # 消したものが除外リストに残っていると設定が汚れるので外す
+        cfg["exclude"] = [n for n in cfg["exclude"] if n != target["file"]]
+        # 一度外したものを候補に出し続けると、誤って戻してしまうので覚えておく
+        skip = set(cfg.get("aerialSkip", []))
+        skip.add(asset_id)
+        cfg["aerialSkip"] = sorted(skip)
+        save_config(cfg)
         self._send(200, {"ok": True})
 
     def do_POST(self):
