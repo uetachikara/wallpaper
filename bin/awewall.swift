@@ -22,6 +22,7 @@ struct Options {
     var fade: TimeInterval = 2.5       // クロスフェードにかける時間（秒）
     var zoom = 0.08                    // ズーム量（0.08 = 8%。0 でズーム無効）
     var pan = 0.02                     // 横方向の流し量（画面幅比）
+    var setWallpaper = true            // 下地の壁紙も同じ画像に合わせるか
     var selftest: TimeInterval = 0     // >0 で内部状態を出力して終了（動作確認用）
 }
 
@@ -35,6 +36,7 @@ func parseArgs() -> Options {
         case "--fade":      if let v = it.next(), let d = Double(v) { o.fade = d }
         case "--zoom":      if let v = it.next(), let d = Double(v) { o.zoom = d }
         case "--pan":       if let v = it.next(), let d = Double(v) { o.pan = d }
+        case "--no-set-wallpaper": o.setWallpaper = false
         case "--selftest":  if let v = it.next(), let d = Double(v) { o.selftest = d }
         case "--video-interval":
                             if let v = it.next(), let d = Double(v) { o.videoInterval = d }
@@ -57,6 +59,7 @@ struct Config {
     var zoom: Double?
     var pan: Double?
     var exclude: Set<String> = []       // 表示しないファイル名
+    var setWallpaper: Bool?             // 下地の壁紙を合わせるか
 
     /// 読めなければ nil。設定ファイルは任意なので、無くても動く。
     static func load(_ path: String) -> Config? {
@@ -71,6 +74,7 @@ struct Config {
         c.zoom = obj["zoom"] as? Double
         c.pan = obj["pan"] as? Double
         if let ex = obj["exclude"] as? [String] { c.exclude = Set(ex) }
+        c.setWallpaper = obj["setWallpaper"] as? Bool
         return c
     }
 }
@@ -353,6 +357,7 @@ final class Controller: NSObject {
             if let v = c.fade { e.fade = v }
             if let v = c.zoom { e.zoom = v }
             if let v = c.pan { e.pan = v }
+            if let v = c.setWallpaper { e.setWallpaper = v }
             excluded = c.exclude
         } else {
             excluded = []
@@ -460,6 +465,23 @@ final class Controller: NSObject {
         return bag.removeLast()
     }
 
+    /// 下地の壁紙を表示中の画像に合わせる。
+    ///
+    /// 自前の背景はウインドウなので、Mission Control やウインドウを浮かせる操作では
+    /// 他のウインドウと一緒に隠れ、その下の壁紙が見えてしまう。
+    /// 壁紙側も同じ絵にしておけば、隠れても見た目が変わらない。
+    private func syncSystemWallpaper(_ path: String) {
+        guard effective.setWallpaper else { return }
+        let url = URL(fileURLWithPath: path)
+        let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
+            .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
+            .allowClipping: true,
+        ]
+        for screen in NSScreen.screens {
+            try? NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: options)
+        }
+    }
+
     private func advance() {
         let i = nextIndex()
         lastIndex = i
@@ -478,6 +500,8 @@ final class Controller: NSObject {
                 return
             }
             media = .image(img)
+            // 動画は壁紙にできないため、静止画のときだけ下地を合わせる
+            syncSystemWallpaper(path)
         }
 
         currentMedia = media

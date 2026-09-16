@@ -26,6 +26,11 @@
   .ctl .row { display: flex; align-items: center; gap: 10px; }
   .ctl input[type=range] { flex: 1; accent-color: var(--accent); }
   .ctl output { min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
+  .ctl.toggle { display: flex; align-items: center; }
+  .ctl.toggle label { display: flex; align-items: center; gap: 8px; margin: 0;
+                      color: var(--text); font-size: 13px; cursor: pointer; }
+  .ctl.toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
+  .ctl.toggle .why { color: var(--muted); font-size: 11px; margin-top: 4px; }
 
   /* カテゴリの絞り込み */
   .cats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; align-items: center; }
@@ -181,6 +186,21 @@ function renderControls() {
     </div>`;
   }).join('');
 
+  // 下地の壁紙を合わせるかどうか。仕組みの説明を添える
+  const wrap = document.createElement('div');
+  wrap.className = 'ctl toggle';
+  wrap.innerHTML = `<div>
+      <label><input type="checkbox" id="c-setWallpaper"
+             ${config.setWallpaper === false ? '' : 'checked'}>
+        Mac の壁紙も同じ画像にする</label>
+      <div class="why">Mission Control などで背景が一時的に隠れたときも見た目が変わらない</div>
+    </div>`;
+  $('controls').appendChild(wrap);
+  $('c-setWallpaper').addEventListener('change', (e) => {
+    config.setWallpaper = e.target.checked;
+    updateStatus();
+  });
+
   CONTROLS.forEach(c => {
     const el = $('c-' + c.key);
     el.addEventListener('input', () => {
@@ -262,6 +282,7 @@ $('save').addEventListener('click', async () => {
     exclude: items.filter(i => !i.enabled).map(i => i.name),
   };
   CONTROLS.forEach(c => { payload[c.key] = config[c.key]; });
+  payload.setWallpaper = config.setWallpaper !== false;
 
   $('save').disabled = true;
   $('status').textContent = '保存中…';

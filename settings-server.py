@@ -49,6 +49,7 @@ DEFAULTS = {
     "zoom": 0.08,
     "pan": 0.02,
     "exclude": [],
+    "setWallpaper": True,
 }
 
 # media/ のフォルダ名を画面に出す日本語名へ対応づける
@@ -362,6 +363,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         for key in ("interval", "videoInterval", "fade", "zoom", "pan"):
             if key in payload:
                 cfg[key] = float(payload[key])
+        if "setWallpaper" in payload:
+            cfg["setWallpaper"] = bool(payload["setWallpaper"])
         if "exclude" in payload:
             cfg["exclude"] = sorted(set(payload["exclude"]))
         save_config(cfg)
