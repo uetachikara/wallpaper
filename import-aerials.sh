@@ -13,7 +13,7 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 
 command -v ffmpeg >/dev/null 2>&1 || { echo "ffmpeg が必要です" >&2; exit 1; }
 
-python3 - "$DIR" "${1:-2560}" "${2:-1440}" <<'PYEOF'
+python3 -u - "$DIR" "${1:-2560}" "${2:-1440}" <<'PYEOF'
 import os, sys
 
 base, W, H = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
