@@ -69,6 +69,25 @@
   .uplog .warn { color: #ffcf7a; }
   .uplog .ok { color: var(--muted); }
 
+  /* Mac の空撮壁紙 */
+  .section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+             padding: 16px; margin-bottom: 20px; }
+  .section h2 { margin: 0 0 4px; font-size: 14px; }
+  .section .note { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  .aerials { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+  .ae { position: relative; border: 2px solid var(--line); border-radius: 8px;
+        overflow: hidden; background: #000; aspect-ratio: 16/10; cursor: pointer; }
+  .ae img { width: 100%; height: 100%; object-fit: cover; display: block; opacity: .55; }
+  .ae.done img { opacity: 1; }
+  .ae.done { border-color: var(--accent); }
+  .ae.busy { border-color: #ffcf7a; }
+  .ae .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 5px 8px;
+             background: linear-gradient(transparent, rgba(0,0,0,.9)); font-size: 11px;
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ae .state { position: absolute; right: 6px; top: 6px; background: rgba(0,0,0,.75);
+               border-radius: 4px; padding: 2px 7px; font-size: 11px; }
+  .ae.done .state { background: var(--accent); color: #0b0d10; font-weight: 700; }
+
   /* 保存バー */
   .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel);
          border-top: 1px solid var(--line); padding: 14px 24px;
@@ -96,6 +115,15 @@
     <input type="file" id="file" multiple
            accept=".jpg,.jpeg,.png,.webp,.heic,.tif,.tiff,.mp4,.m4v,.mov">
     <div class="uplog" id="uplog"></div>
+  </div>
+
+  <div class="section" id="aerialSection" hidden>
+    <h2>Mac の空撮壁紙</h2>
+    <div class="note">
+      macOS がダウンロード済みの映像。クリックすると画面サイズへ変換して追加する
+      （1本あたり40秒ほど）。<span id="aerialCount"></span>
+    </div>
+    <div class="aerials" id="aerials"></div>
   </div>
 
   <div class="cats" id="cats"></div>
@@ -314,9 +342,78 @@ drop.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
 ['dragover', 'drop'].forEach(ev =>
   document.addEventListener(ev, (e) => { if (e.target !== drop) e.preventDefault(); }));
 
+// ---- Mac の空撮壁紙 ----
+
+let aerialItems = [];
+let aerialBusy = false;
+
+async function loadAerials() {
+  try {
+    const res = await fetch('/api/aerials');
+    const data = await res.json();
+    aerialItems = data.items || [];
+  } catch {
+    aerialItems = [];
+  }
+  if (!aerialItems.length) return;   // 1本も無ければ節を出さない
+
+  $('aerialSection').hidden = false;
+  const done = aerialItems.filter(a => a.imported).length;
+  $('aerialCount').textContent = `取り込み済み ${done} / ${aerialItems.length} 本`;
+
+  $('aerials').innerHTML = aerialItems.map(a => `
+    <div class="ae ${a.imported ? 'done' : ''}" data-id="${a.id}">
+      ${a.hasThumb
+        ? `<img loading="lazy" src="/aerial-thumb/${a.id}" alt="">`
+        : '<img alt="">'}
+      <span class="state">${a.imported ? '✓' : a.sizeMB + 'MB'}</span>
+      <span class="cap">${a.name}</span>
+    </div>`).join('');
+
+  $('aerials').querySelectorAll('.ae').forEach(el => {
+    el.addEventListener('click', () => importAerial(el));
+  });
+}
+
+async function importAerial(el) {
+  const id = el.dataset.id;
+  const item = aerialItems.find(a => a.id === id);
+  if (!item || item.imported) return;      // 取り込み済みは何もしない
+  if (aerialBusy) {
+    $('status').textContent = '別の映像を変換中です。終わるまでお待ちください';
+    return;
+  }
+
+  aerialBusy = true;
+  el.classList.add('busy');
+  el.querySelector('.state').textContent = '変換中';
+  $('status').textContent = `変換中… ${item.name}`;
+
+  try {
+    const res = await fetch('/api/aerials/import?id=' + encodeURIComponent(id), { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || res.status);
+    item.imported = true;
+    el.classList.remove('busy');
+    el.classList.add('done');
+    el.querySelector('.state').textContent = '✓';
+    $('status').textContent = `${item.name} を追加しました`;
+    await load();                           // 下の一覧にも反映する
+    const done = aerialItems.filter(a => a.imported).length;
+    $('aerialCount').textContent = `取り込み済み ${done} / ${aerialItems.length} 本`;
+  } catch (e) {
+    el.classList.remove('busy');
+    el.querySelector('.state').textContent = item.sizeMB + 'MB';
+    $('status').textContent = '変換に失敗: ' + e.message;
+  } finally {
+    aerialBusy = false;
+  }
+}
+
 $('reset').addEventListener('click', load);
 
 load();
+loadAerials();
 </script>
 </body>
 </html>

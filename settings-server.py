@@ -17,6 +17,9 @@ import subprocess
 import sys
 import urllib.parse
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import aerials
+
 BASE = os.path.dirname(os.path.abspath(__file__))
 WALLPAPER = os.path.join(BASE, "wallpaper")
 MEDIA = os.path.join(BASE, "media")
@@ -54,7 +57,7 @@ CATEGORY_LABELS = {
     "nasa-apod": "宇宙",
     "nasa-library": "地球・ISS",
     "user": "追加分",
-    "apple-aerials": "Apple空撮",
+    "apple-aerials": "Mac空撮",
 }
 
 
@@ -231,6 +234,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/items":
             self._send(200, {"items": list_items(), "config": load_config()})
 
+        elif path == "/api/aerials":
+            # Mac にダウンロード済みの空撮壁紙を一覧する
+            self._send(200, {"items": aerials.available(WALLPAPER)})
+
+        elif path.startswith("/aerial-thumb/"):
+            asset_id = urllib.parse.unquote(path[len("/aerial-thumb/"):])
+            if "/" in asset_id or ".." in asset_id:
+                self._send(404, {"error": "not found"})
+                return
+            thumb = aerials.thumbnail_path(asset_id)
+            if not thumb:
+                self._send(404, {"error": "no thumbnail"})
+                return
+            with open(thumb, "rb") as f:
+                self._send(200, f.read(), "image/png")
+
         elif path.startswith("/thumb/"):
             name = urllib.parse.unquote(path[len("/thumb/"):])
             # ディレクトリを遡る指定を弾く
@@ -303,8 +322,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
         touch_config()
         self._send(200, {"ok": True, "name": name, "width": w, "height": h, "warning": note})
 
+    def _handle_aerial_import(self):
+        """空撮映像を1本だけ取り込む。変換に数十秒かかるため1本ずつ受ける。"""
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        asset_id = query.get("id", [""])[0]
+        if not asset_id or "/" in asset_id or ".." in asset_id:
+            self._send(400, {"error": "id が不正です"})
+            return
+        try:
+            name, err = aerials.convert(asset_id, WALLPAPER, OUT_W, OUT_H)
+        except Exception as e:
+            self._send(500, {"error": str(e)[:200]})
+            return
+        if err:
+            self._send(400, {"error": err})
+            return
+        touch_config()
+        self._send(200, {"ok": True, "name": name})
+
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
+        if path == "/api/aerials/import":
+            self._handle_aerial_import()
+            return
         if path == "/api/upload":
             self._handle_upload()
             return
@@ -331,9 +371,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def main():
     if not os.path.isdir(WALLPAPER):
         sys.exit(f"wallpaper フォルダがありません: {WALLPAPER}")
-    socketserver.TCPServer.allow_reuse_address = True
+    # 変換に数十秒かかる要求があるため、1本のスレッドで捌くと画面が固まる
+    class Server(socketserver.ThreadingTCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+
     # 127.0.0.1 に限定する。他の端末からは接続できない
-    with socketserver.TCPServer(("127.0.0.1", PORT), Handler) as httpd:
+    with Server(("127.0.0.1", PORT), Handler) as httpd:
         print(f"設定画面: http://localhost:{PORT}")
         print("終了するには Control-C")
         try:
