@@ -21,3 +21,7 @@ config.json
 .last-wallpaper
 
 .DS_Store
+
+# Python のキャッシュ
+__pycache__/
+*.pyc
