@@ -10,7 +10,7 @@ MODE="${1:---wallpaper}"
 OUT="$HOME/Desktop/Awe-$(date +%Y%m%d).tar.gz"
 
 # 常に入れるもの。バイナリのソースも入れて、移動先で再ビルドできるようにする
-COMMON=(awe.html install.sh backdrop-agent.sh make-wallpaper.sh refresh.sh
+COMMON=(awe.html install.sh backdrop-agent.sh make-wallpaper.sh refresh.sh import-aerials.sh
         rotate-wallpaper.sh rotation-agent.sh
         settings.sh settings.html settings-server.py
         fetch-apod.sh fetch-nasa.sh fetch-nature.sh bin)
@@ -24,8 +24,9 @@ esac
 
 cd "$DIR"
 # ログや状態ファイルは持ち出さない（移動先のパスと食い違うため）
+# Apple の Aerial 由来のファイルは著作物なので持ち出さない
 tar --exclude=".backdrop.log" --exclude=".rotation.log" --exclude=".last-wallpaper" \
-    --exclude=".thumbs" \
+    --exclude=".thumbs" --exclude="aerial_*" --exclude="apple-aerials" \
     -czf "$OUT" "${TARGETS[@]}"
 
 echo "作成: $OUT"

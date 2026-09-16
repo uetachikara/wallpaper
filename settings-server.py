@@ -54,6 +54,7 @@ CATEGORY_LABELS = {
     "nasa-apod": "宇宙",
     "nasa-library": "地球・ISS",
     "user": "追加分",
+    "apple-aerials": "Apple空撮",
 }
 
 

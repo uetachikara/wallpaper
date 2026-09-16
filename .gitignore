@@ -7,6 +7,10 @@ wallpaper/
 bin/awewall
 bin/setwall
 
+# Apple の Aerial 壁紙から取り込んだもの。著作物なので配布しない
+wallpaper/aerial_*
+media/apple-aerials/
+
 # 個人の設定と、設定画面が作るサムネイル置き場
 config.json
 .thumbs/
