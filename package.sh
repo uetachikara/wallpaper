@@ -12,6 +12,7 @@ OUT="$HOME/Desktop/Awe-$(date +%Y%m%d).tar.gz"
 # 常に入れるもの。バイナリのソースも入れて、移動先で再ビルドできるようにする
 COMMON=(awe.html install.sh backdrop-agent.sh make-wallpaper.sh refresh.sh
         rotate-wallpaper.sh rotation-agent.sh
+        settings.sh settings.html settings-server.py
         fetch-apod.sh fetch-nasa.sh fetch-nature.sh bin)
 
 case "$MODE" in
@@ -24,6 +25,7 @@ esac
 cd "$DIR"
 # ログや状態ファイルは持ち出さない（移動先のパスと食い違うため）
 tar --exclude=".backdrop.log" --exclude=".rotation.log" --exclude=".last-wallpaper" \
+    --exclude=".thumbs" \
     -czf "$OUT" "${TARGETS[@]}"
 
 echo "作成: $OUT"

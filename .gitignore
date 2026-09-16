@@ -7,6 +7,10 @@ wallpaper/
 bin/awewall
 bin/setwall
 
+# 個人の設定と、設定画面が作るサムネイル置き場
+config.json
+.thumbs/
+
 # 実行時に生成される状態・ログ
 .backdrop.log
 .rotation.log

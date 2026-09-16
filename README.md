@@ -36,6 +36,35 @@ cd ~/Awe
 ./install.sh 30 5 0.05 60   # 画像30秒 / フェード5秒 / ズーム5% / 動画60秒
 ```
 
+## 設定画面
+
+表示する画像の選択と、間隔・フェード・ズーム量の調整はブラウザから行う。
+
+```bash
+./settings.sh
+```
+
+`http://localhost:8787` が開く。サムネイルをクリックして表示の ON/OFF を切り替え、
+カテゴリ単位の一括切替とスライダーでの調整もできる。保存すると `config.json` に書き出され、
+常駐プロセスが数秒で拾って反映する。**再起動は不要。**
+
+外部には公開せず `127.0.0.1` のみで待ち受ける。設定し終えたら Control-C で終了してよい。
+
+設定ファイルを直接編集してもよい。
+
+```json
+{
+  "interval": 10,        // 画像の表示秒数
+  "videoInterval": 30,   // 動画の表示秒数
+  "fade": 2.5,           // クロスフェードの秒数
+  "zoom": 0.08,          // ズーム量（0 で無効）
+  "pan": 0.02,           // 横方向の流し量
+  "exclude": []          // 表示しないファイル名
+}
+```
+
+`config.json` が無ければ `install.sh` に渡した値で動く。
+
 ## 操作
 
 ```bash
@@ -44,8 +73,8 @@ cd ~/Awe
 ./make-wallpaper.sh 3840 2160   # 別の解像度で作り直す
 ```
 
-素材を増やしたら `make-wallpaper.sh` のあとに `install.sh` を再実行する。
-常駐プロセスは起動時にファイル一覧を読むため、入れ直さないと反映されない。
+素材を増やしたら `make-wallpaper.sh` を実行したあと、設定画面で保存するか
+`config.json` を触れば一覧を取り直す。常駐プロセスの入れ直しは不要。
 
 ## 全画面ビューア
 
@@ -92,6 +121,9 @@ awe.html              全画面ビューア（単体で動く HTML）
 bin/awewall.swift     背景描画の本体
 bin/setwall.swift     壁紙を差し替える補助ツール
 install.sh            ビルドと常駐登録
+settings.sh           設定画面を開く
+settings.html         設定画面の中身
+settings-server.py    設定画面のローカルサーバー
 backdrop-agent.sh     常駐の登録・解除・状態確認
 make-wallpaper.sh     素材を画面サイズに合わせて書き出す
 refresh.sh            awe.html のファイル一覧を更新

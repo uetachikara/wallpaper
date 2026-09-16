@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Awe 設定</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f25; --line: #2b3038;
+    --text: #e8eaed; --muted: #9aa3ad; --accent: #6aa9ff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.7 -apple-system, "Hiragino Sans", sans-serif; }
+  header { position: sticky; top: 0; z-index: 10; background: var(--panel);
+           border-bottom: 1px solid var(--line); padding: 16px 24px; }
+  h1 { margin: 0 0 4px; font-size: 17px; }
+  .sub { color: var(--muted); font-size: 12px; }
+  main { padding: 20px 24px 120px; max-width: 1400px; margin: 0 auto; }
+
+  /* 表示の調整 */
+  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+              gap: 16px; background: var(--panel); border: 1px solid var(--line);
+              border-radius: 10px; padding: 16px; margin-bottom: 20px; }
+  .ctl label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .ctl .row { display: flex; align-items: center; gap: 10px; }
+  .ctl input[type=range] { flex: 1; accent-color: var(--accent); }
+  .ctl output { min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* カテゴリの絞り込み */
+  .cats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; align-items: center; }
+  .chip { border: 1px solid var(--line); background: var(--panel); color: var(--text);
+          border-radius: 999px; padding: 6px 14px; cursor: pointer; font-size: 13px; }
+  .chip.on { border-color: var(--accent); color: var(--accent); }
+  .spacer { flex: 1; }
+  button { border: 1px solid var(--line); background: var(--panel); color: var(--text);
+           border-radius: 8px; padding: 7px 14px; cursor: pointer; font-size: 13px; }
+  button:hover { border-color: var(--accent); }
+
+  /* サムネイル一覧 */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .card { position: relative; border: 2px solid var(--line); border-radius: 8px;
+          overflow: hidden; cursor: pointer; background: #000; aspect-ratio: 16/9; }
+  .card.off { opacity: .3; }
+  .card.on { border-color: var(--accent); }
+  .card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .card .tag { position: absolute; left: 6px; top: 6px; background: rgba(0,0,0,.7);
+               border-radius: 4px; padding: 2px 7px; font-size: 11px; }
+  .card .name { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 8px;
+                background: linear-gradient(transparent, rgba(0,0,0,.85)); font-size: 11px;
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .mark { position: absolute; right: 6px; top: 6px; width: 20px; height: 20px;
+                border-radius: 50%; background: var(--accent); color: #0b0d10;
+                font-size: 13px; line-height: 20px; text-align: center; font-weight: 700; }
+  .card.off .mark { display: none; }
+
+  /* 保存バー */
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel);
+         border-top: 1px solid var(--line); padding: 14px 24px;
+         display: flex; align-items: center; gap: 16px; }
+  .bar .status { color: var(--muted); font-size: 13px; }
+  .save { background: var(--accent); color: #0b0d10; border-color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Awe 設定</h1>
+  <div class="sub">保存すると数秒で背景に反映される。アプリの再起動は不要。</div>
+</header>
+
+<main>
+  <div class="controls" id="controls"></div>
+
+  <div class="cats" id="cats"></div>
+
+  <div class="grid" id="grid"></div>
+</main>
+
+<div class="bar">
+  <span class="status" id="status">読み込み中…</span>
+  <span class="spacer"></span>
+  <button id="reset">変更を破棄</button>
+  <button class="save" id="save">保存して反映</button>
+</div>
+
+<script>
+'use strict';
+
+// 調整できる項目。範囲と刻みをここで一元管理する
+const CONTROLS = [
+  { key: 'interval',      label: '画像の表示時間', min: 3,    max: 300, step: 1,    unit: '秒' },
+  { key: 'videoInterval', label: '動画の表示時間', min: 5,    max: 300, step: 5,    unit: '秒' },
+  { key: 'fade',          label: 'フェード',       min: 0.2,  max: 10,  step: 0.1,  unit: '秒' },
+  { key: 'zoom',          label: 'ズーム量',       min: 0,    max: 0.3, step: 0.01, unit: '%', scale: 100 },
+];
+
+let items = [];
+let config = {};
+let activeCats = new Set();   // 絞り込みで表示するカテゴリ
+
+const $ = (id) => document.getElementById(id);
+
+async function load() {
+  const res = await fetch('/api/items');
+  const data = await res.json();
+  items = data.items;
+  config = data.config;
+  activeCats = new Set(items.map(i => i.category));
+  renderControls();
+  renderCats();
+  renderGrid();
+  updateStatus();
+}
+
+function renderControls() {
+  $('controls').innerHTML = CONTROLS.map(c => {
+    const scale = c.scale || 1;
+    const v = (config[c.key] ?? 0) * scale;
+    return `<div class="ctl">
+      <label>${c.label}</label>
+      <div class="row">
+        <input type="range" id="c-${c.key}" min="${c.min * scale}" max="${c.max * scale}"
+               step="${c.step * scale}" value="${v}">
+        <output id="o-${c.key}">${v}${c.unit}</output>
+      </div>
+    </div>`;
+  }).join('');
+
+  CONTROLS.forEach(c => {
+    const el = $('c-' + c.key);
+    el.addEventListener('input', () => {
+      $('o-' + c.key).textContent = el.value + c.unit;
+      config[c.key] = Number(el.value) / (c.scale || 1);
+      updateStatus();
+    });
+  });
+}
+
+function renderCats() {
+  const counts = {};
+  items.forEach(i => {
+    counts[i.category] = counts[i.category] || { label: i.label, total: 0, on: 0 };
+    counts[i.category].total++;
+    if (i.enabled) counts[i.category].on++;
+  });
+
+  const chips = Object.entries(counts).map(([cat, c]) =>
+    `<button class="chip ${activeCats.has(cat) ? 'on' : ''}" data-cat="${cat}">
+       ${c.label} ${c.on}/${c.total}
+     </button>`).join('');
+
+  $('cats').innerHTML = chips +
+    `<span class="spacer"></span>
+     <button data-act="all">表示中をすべて有効</button>
+     <button data-act="none">表示中をすべて無効</button>`;
+
+  $('cats').querySelectorAll('[data-cat]').forEach(b => {
+    b.addEventListener('click', () => {
+      const cat = b.dataset.cat;
+      activeCats.has(cat) ? activeCats.delete(cat) : activeCats.add(cat);
+      renderCats();
+      renderGrid();
+    });
+  });
+  $('cats').querySelectorAll('[data-act]').forEach(b => {
+    b.addEventListener('click', () => {
+      // 絞り込みで見えているものだけをまとめて切り替える
+      const on = b.dataset.act === 'all';
+      items.filter(i => activeCats.has(i.category)).forEach(i => { i.enabled = on; });
+      renderCats();
+      renderGrid();
+      updateStatus();
+    });
+  });
+}
+
+function renderGrid() {
+  const shown = items.filter(i => activeCats.has(i.category));
+  $('grid').innerHTML = shown.map(i => `
+    <div class="card ${i.enabled ? 'on' : 'off'}" data-name="${encodeURIComponent(i.name)}">
+      <img loading="lazy" src="/thumb/${encodeURIComponent(i.name)}" alt="">
+      <span class="tag">${i.isVideo ? '動画' : i.label}</span>
+      <span class="mark">✓</span>
+      <span class="name">${i.name.replace(/\.[^.]+$/, '')}</span>
+    </div>`).join('');
+
+  $('grid').querySelectorAll('.card').forEach(card => {
+    card.addEventListener('click', () => {
+      const name = decodeURIComponent(card.dataset.name);
+      const item = items.find(i => i.name === name);
+      item.enabled = !item.enabled;
+      card.classList.toggle('on', item.enabled);
+      card.classList.toggle('off', !item.enabled);
+      renderCats();
+      updateStatus();
+    });
+  });
+}
+
+function updateStatus() {
+  const on = items.filter(i => i.enabled).length;
+  $('status').textContent = `表示対象 ${on} / ${items.length} 件`;
+}
+
+$('save').addEventListener('click', async () => {
+  const payload = {
+    exclude: items.filter(i => !i.enabled).map(i => i.name),
+  };
+  CONTROLS.forEach(c => { payload[c.key] = config[c.key]; });
+
+  $('save').disabled = true;
+  $('status').textContent = '保存中…';
+  try {
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    $('status').textContent = '保存しました。数秒で背景に反映される';
+  } catch (e) {
+    $('status').textContent = '保存に失敗: ' + e.message;
+  } finally {
+    $('save').disabled = false;
+  }
+});
+
+$('reset').addEventListener('click', load);
+
+load();
+</script>
+</body>
+</html>

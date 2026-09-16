@@ -48,6 +48,33 @@ func parseArgs() -> Options {
     return o
 }
 
+/// config.json から読み込む設定。存在する項目だけを上書きする。
+/// コマンドライン引数は設定ファイルが無いときの既定値として残す。
+struct Config {
+    var interval: TimeInterval?
+    var videoInterval: TimeInterval?
+    var fade: TimeInterval?
+    var zoom: Double?
+    var pan: Double?
+    var exclude: Set<String> = []       // 表示しないファイル名
+
+    /// 読めなければ nil。設定ファイルは任意なので、無くても動く。
+    static func load(_ path: String) -> Config? {
+        guard let data = FileManager.default.contents(atPath: path),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+
+        var c = Config()
+        c.interval = obj["interval"] as? Double
+        c.videoInterval = obj["videoInterval"] as? Double
+        c.fade = obj["fade"] as? Double
+        c.zoom = obj["zoom"] as? Double
+        c.pan = obj["pan"] as? Double
+        if let ex = obj["exclude"] as? [String] { c.exclude = Set(ex) }
+        return c
+    }
+}
+
 /// 表示する中身。静止画と動画を同じ経路で扱えるようにする。
 enum Media {
     case image(CGImage)
@@ -243,7 +270,16 @@ final class Controller: NSObject {
     private var cycle = 0             // 何巡目か（動作確認用）
     private var timer: Timer?
     private var screenTimer: Timer?
+    private var configTimer: Timer?
+    // 設定ファイルは画像フォルダの1つ上（~/Awe/config.json）に置く
+    private var configPath: String {
+        URL(fileURLWithPath: opts.dir).deletingLastPathComponent()
+            .appendingPathComponent("config.json").path
+    }
+    private var configStamp: Date?
+    private var effective: Options
     private var lastScreenFrames: [NSRect] = []
+    private var excluded: Set<String> = []
     private var currentMedia: Media?
     private var currentHold: TimeInterval = 0
     private var first = true
@@ -253,10 +289,14 @@ final class Controller: NSObject {
 
     init(opts: Options) {
         self.opts = opts
+        self.effective = opts
         super.init()
     }
 
     func start() {
+        applyConfig()
+        // 起動時点の更新時刻を控えておく（初回の監視で変更扱いにしないため）
+        configStamp = (try? FileManager.default.attributesOfItem(atPath: configPath))?[.modificationDate] as? Date
         reloadFiles()
         guard !files.isEmpty else {
             FileHandle.standardError.write("表示できるファイルがありません: \(opts.dir)\n".data(using: .utf8)!)
@@ -269,7 +309,58 @@ final class Controller: NSObject {
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
 
         advance()
+        startWatchingConfig()
         if opts.selftest > 0 { startSelftest() }
+    }
+
+    /// 設定ファイルと画像フォルダの変化を定期的に見に行く。
+    /// ファイル監視 API は書き換え方（上書き・置換）で挙動が変わるため、
+    /// 更新時刻の比較という単純で確実な方法にしている。
+    private func startWatchingConfig() {
+        let t = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.reloadIfChanged()
+        }
+        RunLoop.main.add(t, forMode: .common)
+        configTimer = t
+    }
+
+    private func reloadIfChanged() {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: configPath)
+        let stamp = attrs?[.modificationDate] as? Date
+        guard stamp != configStamp else { return }
+        configStamp = stamp
+
+        applyConfig()
+        let before = files
+        reloadFiles()
+        if files != before {
+            // 表示対象が変わったので順番も取り直す
+            bag = []
+            print("設定を再読み込みしました（表示対象 \(files.count) 件）")
+            fflush(stdout)
+        } else {
+            print("設定を再読み込みしました")
+            fflush(stdout)
+        }
+    }
+
+    /// config.json の内容を実際に使う設定へ反映する
+    private func applyConfig() {
+        var e = opts
+        if let c = Config.load(configPath) {
+            if let v = c.interval { e.interval = v }
+            if let v = c.videoInterval { e.videoInterval = v }
+            if let v = c.fade { e.fade = v }
+            if let v = c.zoom { e.zoom = v }
+            if let v = c.pan { e.pan = v }
+            excluded = c.exclude
+        } else {
+            excluded = []
+        }
+        // フェードが表示時間を超えないよう、ここでも上限を掛け直す
+        let shortest = min(e.interval, e.videoInterval > 0 ? e.videoInterval : e.interval)
+        e.fade = min(e.fade, max(0.1, shortest - 0.5))
+        effective = e
     }
 
     /// ズームと動画再生が実際に効いているかを、内部状態を定期的に読んで確かめる。
@@ -292,6 +383,7 @@ final class Controller: NSObject {
         let ok = Set(Controller.videoExts + Controller.imageExts)
         files = ((try? fm.contentsOfDirectory(atPath: opts.dir)) ?? [])
             .filter { ok.contains(($0 as NSString).pathExtension.lowercased()) }
+            .filter { !excluded.contains($0) }     // 設定画面で外したものを除く
             .sorted()
             .map { opts.dir + "/" + $0 }
     }
@@ -326,8 +418,8 @@ final class Controller: NSObject {
         // 画面をまたぐたびに順番が飛んでしまう
         if let media = currentMedia {
             for w in windows {
-                w.show(media, fade: opts.fade, hold: currentHold,
-                       zoom: opts.zoom, pan: opts.pan, animated: false)
+                w.show(media, fade: effective.fade, hold: currentHold,
+                       zoom: effective.zoom, pan: effective.pan, animated: false)
             }
         }
     }
@@ -374,11 +466,11 @@ final class Controller: NSObject {
         let path = files[i]
 
         let media: Media
-        var hold = opts.interval
+        var hold = effective.interval
         if isVideo(path) {
             media = .video(URL(fileURLWithPath: path))
             // 動画は静止画より長く見せたいことが多いので別の秒数を持てるようにしてある
-            hold = opts.videoInterval > 0 ? opts.videoInterval : opts.interval
+            hold = effective.videoInterval > 0 ? effective.videoInterval : effective.interval
         } else {
             guard let img = loadCGImage(path) else {
                 // 読めないファイルは飛ばして次へ
@@ -393,8 +485,8 @@ final class Controller: NSObject {
         let animated = !first
         first = false
         for w in windows {
-            w.show(media, fade: opts.fade, hold: hold,
-                   zoom: opts.zoom, pan: opts.pan, animated: animated)
+            w.show(media, fade: effective.fade, hold: hold,
+                   zoom: effective.zoom, pan: effective.pan, animated: animated)
         }
         scheduleNext(after: hold)
 
