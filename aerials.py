@@ -112,29 +112,48 @@ def is_hdr(path):
 
 
 def available(wallpaper_dir):
-    """ダウンロード済みの映像を一覧する。取り込み済みかどうかも返す。"""
+    """設定画面で扱える映像を一覧する。
+
+    原本が手元にあるもの（取り込める）と、
+    原本を消したあとでも変換済みで残っているものの両方を返す。
+    """
     names = catalog()
     seen = {}
+    taken = set()     # 同じ映像を id と shotID で二重に数えないための控え
+
+    def add(stem, src):
+        if stem in seen:
+            return
+        label = names.get(stem, stem)
+        out_name = PREFIX + safe_name(label) + ".mp4"
+        if out_name in taken:
+            return
+        taken.add(out_name)
+        seen[stem] = {
+            "id": stem,
+            "name": label,
+            "file": out_name,
+            "imported": os.path.exists(os.path.join(wallpaper_dir, out_name)),
+            "sizeMB": round(os.path.getsize(src) / 1024 / 1024) if src else 0,
+            "hasThumb": thumbnail_path(stem) is not None,
+            "hasSource": src is not None,
+        }
+
     for d in VIDEO_DIRS:
         if not os.path.isdir(d):
             continue
         for n in sorted(os.listdir(d)):
-            if not n.lower().endswith((".mov", ".mp4")):
-                continue
-            stem = os.path.splitext(n)[0]
-            if stem in seen:
-                continue
-            src = os.path.join(d, n)
-            label = names.get(stem, stem)
+            if n.lower().endswith((".mov", ".mp4")):
+                add(os.path.splitext(n)[0], os.path.join(d, n))
+
+    # 原本が無くても、変換済みのものは一覧に残す
+    if os.path.isdir(wallpaper_dir):
+        converted = {n for n in os.listdir(wallpaper_dir) if n.startswith(PREFIX)}
+        for asset_id, label in names.items():
             out_name = PREFIX + safe_name(label) + ".mp4"
-            seen[stem] = {
-                "id": stem,
-                "name": label,
-                "file": out_name,
-                "imported": os.path.exists(os.path.join(wallpaper_dir, out_name)),
-                "sizeMB": round(os.path.getsize(src) / 1024 / 1024),
-                "hasThumb": thumbnail_path(stem) is not None,
-            }
+            if out_name in converted:
+                add(asset_id, None)
+
     return sorted(seen.values(), key=lambda x: x["name"])
 
 
@@ -161,6 +180,22 @@ def source_path(asset_id):
     return None
 
 
+def convert_file(src, label, wallpaper_dir, width=2560, height=1440):
+    """任意の場所にある映像を、表示名を指定して変換する。
+
+    配信元から直接取得した場合など、Apple の保存先に無いものを扱うために使う。
+    """
+    out_name = PREFIX + safe_name(label) + ".mp4"
+    dst = os.path.join(wallpaper_dir, out_name)
+    if os.path.exists(dst):
+        return out_name, None
+    err = _run_convert(src, dst, width, height)
+    if err:
+        return None, err
+    link_marker(wallpaper_dir, out_name, src)
+    return out_name, None
+
+
 def convert(asset_id, wallpaper_dir, width=2560, height=1440):
     """1本を画面サイズへ変換して wallpaper/ に置く。
 
@@ -176,6 +211,15 @@ def convert(asset_id, wallpaper_dir, width=2560, height=1440):
     if os.path.exists(dst):
         return out_name, None
 
+    err = _run_convert(src, dst, width, height)
+    if err:
+        return None, err
+    link_marker(wallpaper_dir, out_name, src)
+    return out_name, None
+
+
+def _run_convert(src, dst, width, height):
+    """実際の変換。成功なら None、失敗ならエラー文字列を返す。"""
     # 縮小の前にフレームを間引く。240fps のまま拡縮すると無駄に重い
     vf = (f"fps={TARGET_FPS},scale={width}:{height}:"
           f"force_original_aspect_ratio=increase,crop={width}:{height}")
@@ -195,10 +239,8 @@ def convert(asset_id, wallpaper_dir, width=2560, height=1440):
     if r.returncode != 0 or not os.path.exists(dst):
         if os.path.exists(dst):
             os.remove(dst)
-        return None, (r.stderr or "変換に失敗しました").strip()[:200]
-
-    link_marker(wallpaper_dir, out_name, src)
-    return out_name, None
+        return (r.stderr or "変換に失敗しました").strip()[:200]
+    return None
 
 
 def link_marker(wallpaper_dir, out_name, src):

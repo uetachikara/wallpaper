@@ -136,6 +136,22 @@ macOS に入っている空撮映像（アイスランド、パタゴニア、�
 ./import-aerials.sh
 ```
 
+ダウンロードしていないものまで含めて取りたい場合は、配信元から直接取得できる。
+
+```bash
+./fetch-aerials.sh nature      # 陸の風景 + 海中
+./fetch-aerials.sh landscapes  # 陸の風景のみ
+./fetch-aerials.sh landscapes 10   # 本数を絞る
+```
+
+分類は `landscapes` / `cities` / `underwater` / `space` / `nature` / `all`。
+「取得 → 変換 → 元ファイル削除」を1本ずつ繰り返すので、
+途中で止めても成果は残り、ディスクも一時的にしか使わない。
+取得と変換は並行して動く。
+
+原本は 4K で1本あたり100MB〜1.4GB ある。`landscapes` の全取得は約40GB になるため、
+本数を絞るか、必要な分類だけにするのが現実的。
+
 日本語名はシステムのカタログから引く。音声は除去し、HDR 素材は SDR へ変換する。
 
 素材は 4K・240fps と重いため、ハードウェアデコードを使い、縮小の前にフレームを
