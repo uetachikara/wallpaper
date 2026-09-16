@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Awe — 休憩用ビューア</title>
+<style>
+  :root {
+    --fade: 1.6s;          /* クロスフェード時間 */
+    --ui: rgba(255,255,255,.55);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #000; overflow: hidden; }
+  body { font: 13px/1.6 -apple-system, "Hiragino Sans", sans-serif; color: var(--ui); cursor: none; }
+  body.show-ui { cursor: default; }
+
+  /* 表示レイヤーを2枚重ねてクロスフェードする */
+  .layer {
+    position: absolute; inset: 0; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity var(--fade) ease;
+  }
+  .layer.on { opacity: 1; }
+  .layer img, .layer video {
+    max-width: 100%; max-height: 100%;
+    width: 100%; height: 100%;
+    object-fit: contain;
+  }
+
+  /* 情報バー（マウスを動かした時だけ表示） */
+  #bar {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    padding: 14px 20px 16px;
+    background: linear-gradient(transparent, rgba(0,0,0,.75));
+    display: flex; align-items: center; gap: 16px;
+    opacity: 0; transition: opacity .4s; pointer-events: none;
+  }
+  body.show-ui #bar { opacity: 1; }
+  #caption { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #count { font-variant-numeric: tabular-nums; opacity: .7; }
+  #keys { opacity: .5; font-size: 12px; }
+
+  /* 進行度バー */
+  #progress { position: fixed; left: 0; top: 0; height: 2px; width: 0; background: rgba(255,255,255,.4); }
+  body.paused #progress { background: rgba(255,200,90,.7); }
+
+  /* メディアが無い時の案内 */
+  #empty {
+    position: absolute; inset: 0; display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px; text-align: center; padding: 40px; color: rgba(255,255,255,.7);
+  }
+  #empty.on { display: flex; }
+  #empty code { background: rgba(255,255,255,.1); padding: 2px 8px; border-radius: 4px; color: #fff; }
+  #empty h1 { font-size: 20px; font-weight: 600; color: #fff; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<div class="layer" id="a"></div>
+<div class="layer" id="b"></div>
+<div id="progress"></div>
+
+<div id="empty">
+  <h1>メディアがまだありません</h1>
+  <p><code>~/Awe/media/</code> に画像や動画を入れて、<br>
+     ターミナルで <code>~/Awe/refresh.sh</code> を実行してください。</p>
+  <p>NASA の写真を自動で入れるなら <code>~/Awe/fetch-apod.sh</code></p>
+</div>
+
+<div id="bar">
+  <span id="caption"></span>
+  <span id="count"></span>
+  <span id="keys">Space:一時停止 ←→:前後 F:全画面 S:並び替え K:ズーム切替</span>
+</div>
+
+<script>
+/* AWE_MANIFEST_START — refresh.sh が自動生成。この範囲は手で編集しない */
+window.AWE_MEDIA = [];
+/* AWE_MANIFEST_END */
+</script>
+<script>
+(() => {
+  'use strict';
+
+  // ---- 設定 ----
+  const IMAGE_SEC = 20;       // 静止画1枚あたりの表示秒数
+  const KEN_BURNS = true;     // 静止画をゆっくりパン・ズームさせるか（K キーで切替）
+  const KB_ZOOM = 0.10;       // ズーム量（0.10 = 10%）
+  const KB_PAN = 0.025;       // 横方向の流し量（画面幅比）
+  const VIDEO_MAX_SEC = 90;   // 動画1本の最大再生秒数（長尺の打ち切り用）
+  const VIDEO_EXT = /\.(mp4|m4v|mov|webm)$/i;
+
+  const list = (window.AWE_MEDIA || []).slice();
+  const layers = [document.getElementById('a'), document.getElementById('b')];
+  const bar = { caption: document.getElementById('caption'), count: document.getElementById('count') };
+  const progress = document.getElementById('progress');
+
+  if (!list.length) { document.getElementById('empty').classList.add('on'); return; }
+
+  // Fisher–Yates で毎回順番を変える（同じ順で飽きないように）
+  const shuffle = (arr) => {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  };
+  shuffle(list);
+
+  let index = -1;      // 現在表示中のインデックス
+  let front = 1;       // 次に描画するレイヤー
+  let paused = false;
+  let timerStart = 0;  // 現在のスライドの開始時刻
+  let duration = 0;    // 現在のスライドの表示予定ミリ秒
+  let elapsed = 0;     // 一時停止をまたいだ累積経過ミリ秒
+  let rafId = 0;
+  let kenBurns = KEN_BURNS;
+  let anim = null;            // 現在再生中の Ken Burns アニメーション
+
+  // ファイル名からキャプションを作る（拡張子とアンダースコアを除去）
+  const captionOf = (path) => decodeURIComponent(path.split('/').pop())
+    .replace(/\.[^.]+$/, '')            // 拡張子を落とす
+    .replace(/^\d{4}-\d{2}-\d{2}_/, '') // 先頭の日付を落とす
+    .replace(/[_-]+/g, ' ')
+    .trim();
+
+  function show(step) {
+    index = (index + step + list.length) % list.length;
+    const src = list[index];
+    const layer = layers[front];
+    front = 1 - front;
+
+    layer.innerHTML = '';
+    let node;
+
+    if (VIDEO_EXT.test(src)) {
+      node = document.createElement('video');
+      node.src = src;
+      node.muted = true;          // 会社PCで音が鳴らないよう常にミュート
+      node.autoplay = true;
+      node.playsInline = true;
+      node.loop = false;
+      // 動画は再生完了で次へ。長すぎる場合は VIDEO_MAX_SEC で打ち切る
+      node.addEventListener('ended', () => next());
+      node.addEventListener('loadedmetadata', () => {
+        duration = Math.min(node.duration || VIDEO_MAX_SEC, VIDEO_MAX_SEC) * 1000;
+      });
+      // 再生開始は DOM 追加後（下の startVideo）で行う
+      duration = VIDEO_MAX_SEC * 1000;
+    } else {
+      node = document.createElement('img');
+      node.src = src;
+      node.alt = '';
+      duration = IMAGE_SEC * 1000;
+      if (kenBurns) applyKenBurns(node, duration);
+    }
+
+    // 読み込み失敗したファイルは飛ばす
+    node.addEventListener('error', () => setTimeout(() => next(), 200));
+
+    layer.appendChild(node);
+    // 動画は DOM に入ってから再生を開始する。読み込みが間に合わない場合に備え canplay でも試みる
+    if (node.tagName === 'VIDEO') {
+      const startVideo = () => { if (!paused) node.play().catch(() => {}); };
+      startVideo();
+      node.addEventListener('canplay', startVideo, { once: true });
+    }
+    layer.classList.add('on');
+    layers[front].classList.remove('on');
+    // 裏に回ったレイヤーの動画は止めて負荷を下げる
+    const old = layers[front].querySelector('video');
+    if (old) old.pause();
+
+    bar.caption.textContent = captionOf(src);
+    bar.count.textContent = (index + 1) + ' / ' + list.length;
+
+    elapsed = 0;
+    timerStart = performance.now();
+  }
+
+  // 静止画にゆっくりしたパン・ズームを掛ける。
+  // Web Animations API を使うのは、一時停止と完全に同期させるため。
+  function applyKenBurns(node, ms) {
+    if (anim) { anim.cancel(); anim = null; }
+    const zoomIn = Math.random() < 0.5;          // 寄るか引くか
+    const dir = Math.random() < 0.5 ? 1 : -1;    // 流す向き
+    const big = `scale(${1 + KB_ZOOM}) translateX(${dir * KB_PAN * 100}%)`;
+    const small = 'scale(1) translateX(0)';
+    const frames = zoomIn ? [small, big] : [big, small];
+    node.style.transform = frames[0];
+    // 画像の読み込み完了を待ってから動かす（読み込み中に動くとカクつく）
+    const start = () => {
+      anim = node.animate(
+        [{ transform: frames[0] }, { transform: frames[1] }],
+        { duration: ms, easing: 'linear', fill: 'forwards' }
+      );
+      if (paused) anim.pause();
+    };
+    node.complete ? start() : node.addEventListener('load', start, { once: true });
+  }
+
+  function next() { show(1); }
+  function prev() { show(-1); }
+
+  // 進行度バーの更新と自動送り
+  function tick(now) {
+    rafId = requestAnimationFrame(tick);
+    if (paused) { timerStart = now - elapsed; return; }
+    elapsed = now - timerStart;
+    const ratio = Math.min(elapsed / duration, 1);
+    progress.style.width = (ratio * 100) + '%';
+    if (ratio >= 1) next();
+  }
+
+  function setPaused(v) {
+    paused = v;
+    document.body.classList.toggle('paused', v);
+    const vid = layers[1 - front].querySelector('video');
+    if (vid) { v ? vid.pause() : vid.play().catch(() => {}); }
+    if (anim) { v ? anim.pause() : anim.play(); }
+  }
+
+  // ---- 操作 ----
+  document.addEventListener('keydown', (e) => {
+    switch (e.key) {
+      case ' ':          e.preventDefault(); setPaused(!paused); break;
+      case 'ArrowRight': next(); break;
+      case 'ArrowLeft':  prev(); break;
+      case 'f': case 'F':
+        document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+        break;
+      case 's': case 'S': shuffle(list); index = -1; next(); break;
+      case 'k': case 'K':
+        kenBurns = !kenBurns;
+        if (!kenBurns && anim) { anim.cancel(); anim = null; }
+        show(0);  // 現在の1枚に即座に反映する
+        break;
+    }
+  });
+  document.addEventListener('click', () => next());
+
+  // マウスを動かした時だけ情報バーを出す
+  let uiTimer;
+  document.addEventListener('mousemove', () => {
+    document.body.classList.add('show-ui');
+    clearTimeout(uiTimer);
+    uiTimer = setTimeout(() => document.body.classList.remove('show-ui'), 2500);
+  });
+
+  next();
+  rafId = requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

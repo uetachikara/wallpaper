@@ -1,0 +1,15 @@
+# 取得した画像・動画。ライセンスが提供元ごとに異なり、容量も大きいため配布物に含めない。
+# 各自 fetch-*.sh で取得する。
+media/
+wallpaper/
+
+# ビルド成果物。CPU 種別に依存するため配布せず、install.sh でビルドする
+bin/awewall
+bin/setwall
+
+# 実行時に生成される状態・ログ
+.backdrop.log
+.rotation.log
+.last-wallpaper
+
+.DS_Store
